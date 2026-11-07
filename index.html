@@ -81,7 +81,7 @@
     // ==========================================
     // ⚙️ 設定區
     // ==========================================
-    const SUPABASE_URL = 'https://cgqloctxrtiwxywyhxgr.supabase.co'; // 你的專案網址
+    const SUPABASE_URL = 'https://cgqloctxrtiwxywyhxgr.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNncWxvY3RyeHRpd3h5d3loeGdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQwNTU3MzcsImV4cCI6MjEwOTYzMTczN30.Hwm1vx-FzTt3BXMqyTD6wMozI3l74XdzNxw_qiszyZM';
     const ACCESS_KEY = 'iLTWzzNR1yqaWLey';
 
@@ -128,7 +128,6 @@
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50/80 transition duration-150';
 
-        // 圖片縮圖
         const imgHtml = item.image_url 
           ? `<img src="${escapeHtml(item.image_url)}" class="w-10 h-10 object-cover rounded-md border border-slate-200">`
           : `<div class="w-10 h-10 bg-slate-100 rounded-md border border-slate-200 flex items-center justify-center text-slate-300 text-xs">無圖</div>`;
@@ -141,7 +140,6 @@
             <div class="inline-flex items-center justify-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
               <button onclick="changeQty('${item.id}', ${item.quantity - 1})" class="w-7 h-7 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 font-bold shadow-sm transition">-</button>
               
-              <!-- 可直接手動輸入數量 -->
               <input type="number" min="0" value="${item.quantity}" 
                 onchange="handleManualQtyChange('${item.id}', this.value)"
                 class="w-16 text-center font-bold text-slate-800 text-sm bg-white border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500">
@@ -157,23 +155,20 @@
       });
     }
 
-    // 處理手動輸入數量變更
     async function handleManualQtyChange(id, val) {
       const num = parseInt(val, 10);
       if (isNaN(num) || num < 0) {
-        fetchInventory(); // 輸入無效數值則回滾
+        fetchInventory();
         return;
       }
       await updateDbQty(id, num);
     }
 
-    // 點擊 +- 按鈕調整數量
     async function changeQty(id, newQty) {
       if (newQty < 0) return;
       await updateDbQty(id, newQty);
     }
 
-    // 統一更新數量的函式
     async function updateDbQty(id, newQty) {
       inventoryData = inventoryData.map(i => i.id === id ? { ...i, quantity: newQty } : i);
       renderTable();
@@ -197,7 +192,6 @@
       }
     }
 
-    // 新增品項（含圖片上傳）
     document.getElementById('add-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const submitBtn = document.getElementById('submit-btn');
@@ -212,7 +206,6 @@
       let uploadedImageUrl = null;
 
       try {
-        // 如果有選擇照片，先上傳至 Supabase Storage
         if (fileInput.files.length > 0) {
           const file = fileInput.files[0];
           const fileExt = file.name.split('.').pop();
@@ -224,7 +217,6 @@
 
           if (uploadError) throw uploadError;
 
-          // 取得公開下載/預覽網址
           const { data: urlData } = client.storage
             .from('inventory-images')
             .getPublicUrl(fileName);
@@ -242,7 +234,6 @@
         const { error: insertError } = await client.from('inventory').insert([newItem]);
         if (insertError) throw insertError;
 
-        // 表單清空重置
         nameInput.value = '';
         skuInput.value = '';
         qtyInput.value = '0';
@@ -257,14 +248,26 @@
       }
     });
 
-    function initRealtime() {
+    function setOnlineStatus(isOnline) {
       const statusEl = document.getElementById('sync-status');
+      if (isOnline) {
+        statusEl.className = 'flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200';
+        statusEl.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> 即時連線同步中';
+      } else {
+        statusEl.className = 'flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200';
+        statusEl.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 重新連線中...';
+      }
+    }
 
-      client
-        .channel('inventory-channel')
+    function initRealtime() {
+      // 1. WebSocket 訂閱
+      const channel = client
+        .channel('realtime_inventory_feed')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, payload => {
           if (payload.eventType === 'INSERT') {
-            inventoryData.unshift(payload.new);
+            if (!inventoryData.some(i => i.id === payload.new.id)) {
+              inventoryData.unshift(payload.new);
+            }
           } else if (payload.eventType === 'UPDATE') {
             inventoryData = inventoryData.map(item => item.id === payload.new.id ? payload.new : item);
           } else if (payload.eventType === 'DELETE') {
@@ -274,13 +277,15 @@
         })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
-            statusEl.className = 'flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200';
-            statusEl.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> 即時連線同步中';
-          } else {
-            statusEl.className = 'flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200';
-            statusEl.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 重新連線中...';
+            setOnlineStatus(true);
           }
         });
+
+      // 2. 自動備援：每 3 秒自動拉取一次最新異動（確保即使 Safari WebSocket 休眠也能保證多端絕對同步）
+      setInterval(() => {
+        fetchInventory();
+        setOnlineStatus(true);
+      }, 3000);
     }
 
     function escapeHtml(str) {
@@ -288,7 +293,8 @@
       return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
     }
 
-    fetchInventory();
+    // 啟動
+    fetchInventory().then(() => setOnlineStatus(true));
     initRealtime();
   </script>
 </body>
