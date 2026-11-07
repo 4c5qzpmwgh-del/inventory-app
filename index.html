@@ -21,7 +21,7 @@
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-6 border-b border-slate-100">
       <div>
         <h1 class="text-2xl font-bold tracking-tight text-slate-900">線上庫存管理</h1>
-        <p class="text-xs text-slate-400 mt-1">多端即時協同編輯</p>
+        <p class="text-xs text-slate-400 mt-1">服裝穿搭與道具分類庫存</p>
       </div>
       <div id="sync-status" class="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">
         <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
@@ -30,7 +30,7 @@
     </div>
 
     <!-- 新增品項表單 -->
-    <form id="add-form" class="mt-6 bg-slate-50 p-4 rounded-xl border border-slate-200/60 flex flex-col gap-3">
+    <form id="add-form" class="mt-6 bg-slate-50 p-4 rounded-xl border border-slate-200/60 flex flex-col gap-4">
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <input type="text" id="name" placeholder="品項名稱 (必填)" required 
           class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
@@ -40,8 +40,16 @@
           class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
       </div>
       
-      <!-- 照片上傳區 -->
-      <div class="flex flex-col sm:flex-row items-center justify-between gap-3">
+      <!-- 分類選擇區（點選標籤） -->
+      <div>
+        <span class="text-xs font-semibold text-slate-500 block mb-2">選擇分類：</span>
+        <div id="category-selector" class="flex flex-wrap gap-2">
+          <!-- 由 JS 動態生成分類選項標籤 -->
+        </div>
+      </div>
+
+      <!-- 照片上傳與提交區 -->
+      <div class="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 border-t border-slate-200/60">
         <div class="w-full sm:w-auto flex items-center gap-2">
           <label class="cursor-pointer bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-sm">
             <span>📷 選擇圖片</span>
@@ -56,21 +64,33 @@
       </div>
     </form>
 
+    <!-- 列表分類篩選選項 -->
+    <div class="mt-8 mb-4">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">庫存分類篩選</span>
+        <span id="filter-count" class="text-xs text-slate-400">共 0 項</span>
+      </div>
+      <div id="filter-container" class="flex flex-wrap gap-1.5">
+        <!-- 由 JS 動態生成篩選按鈕 -->
+      </div>
+    </div>
+
     <!-- 庫存列表 -->
-    <div class="mt-6 overflow-x-auto">
+    <div class="overflow-x-auto">
       <table class="w-full text-left border-collapse">
         <thead>
           <tr class="border-b border-slate-200 text-slate-400 text-xs tracking-wider uppercase">
             <th class="py-3 px-4 font-semibold w-16">圖片</th>
             <th class="py-3 px-4 font-semibold">品名</th>
-            <th class="py-3 px-4 font-semibold">型號 / 識別碼</th>
-            <th class="py-3 px-4 font-semibold text-center w-48">即時庫存</th>
+            <th class="py-3 px-4 font-semibold">分類</th>
+            <th class="py-3 px-4 font-semibold">型號 / 條碼</th>
+            <th class="py-3 px-4 font-semibold text-center w-44">即時庫存</th>
             <th class="py-3 px-4 font-semibold text-right">操作</th>
           </tr>
         </thead>
         <tbody id="inventory-list" class="divide-y divide-slate-100 text-sm">
           <tr>
-            <td colspan="5" class="py-8 text-center text-slate-400">載入中...</td>
+            <td colspan="6" class="py-8 text-center text-slate-400">載入中...</td>
           </tr>
         </tbody>
       </table>
@@ -79,12 +99,28 @@
 
   <script>
     // ==========================================
-    // ⚙️ 正確設定（請嚴格依照下方字串）
+    // ⚙️ 設定區
     // ==========================================
     const SUPABASE_URL = 'https://cgqloctrxtiwxywyhxgr.supabase.co';
     const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNncWxvY3RyeHRpd3h5d3loeGdyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQwNTU3MzcsImV4cCI6MjEwOTYzMTczN30.Hwm1vx-FzTt3BXMqyTD6wMozI3l74XdzNxw_qiszyZM';
     const ACCESS_KEY = 'iLTWzzNR1yqaWLey';
 
+    // 定義 10 個指定分類
+    const CATEGORIES = [
+      '日常穿搭',
+      '正式穿搭',
+      '節慶穿搭',
+      '春節',
+      '中秋節',
+      '端午節',
+      '萬聖節',
+      '聖誕節',
+      '動畫',
+      'cosplay'
+    ];
+
+    let selectedCategory = CATEGORIES[0]; // 預設新增品項的分類
+    let currentFilter = 'ALL';             // 預設篩選所有項目
 
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('key') !== ACCESS_KEY) {
@@ -95,6 +131,54 @@
 
     const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     let inventoryData = [];
+
+    // 初始化分類標籤 UI
+    function initCategoryUI() {
+      // 1. 生成新增表單的分類按鈕
+      const selectorEl = document.getElementById('category-selector');
+      selectorEl.innerHTML = '';
+      CATEGORIES.forEach(cat => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = cat;
+        btn.onclick = () => selectFormCategory(cat);
+        btn.className = `cat-btn px-3 py-1 rounded-lg text-xs font-medium border transition ${
+          cat === selectedCategory 
+            ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+            : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-100'
+        }`;
+        selectorEl.appendChild(btn);
+      });
+
+      // 2. 生成篩選按鈕
+      const filterEl = document.getElementById('filter-container');
+      filterEl.innerHTML = '';
+      
+      const filterOptions = ['ALL', ...CATEGORIES];
+      filterOptions.forEach(opt => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = opt === 'ALL' ? '全部' : opt;
+        btn.onclick = () => setTableFilter(opt);
+        btn.className = `filter-btn px-3 py-1 rounded-full text-xs font-medium border transition ${
+          opt === currentFilter 
+            ? 'bg-slate-800 text-white border-slate-800' 
+            : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-200'
+        }`;
+        filterEl.appendChild(btn);
+      });
+    }
+
+    function selectFormCategory(cat) {
+      selectedCategory = cat;
+      initCategoryUI();
+    }
+
+    function setTableFilter(cat) {
+      currentFilter = cat;
+      initCategoryUI();
+      renderTable();
+    }
 
     // 檔案選取名稱切換
     document.getElementById('image-file').addEventListener('change', (e) => {
@@ -120,12 +204,19 @@
       const tbody = document.getElementById('inventory-list');
       tbody.innerHTML = '';
 
-      if (inventoryData.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-slate-400">目前尚無庫存資料，請由上方新增</td></tr>`;
+      // 依照分類過濾
+      const filteredData = currentFilter === 'ALL' 
+        ? inventoryData 
+        : inventoryData.filter(item => item.category === currentFilter);
+
+      document.getElementById('filter-count').innerText = `顯示 ${filteredData.length} / 共 ${inventoryData.length} 項`;
+
+      if (filteredData.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="py-8 text-center text-slate-400">目前分類無任何品項</td></tr>`;
         return;
       }
 
-      inventoryData.forEach(item => {
+      filteredData.forEach(item => {
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50/80 transition duration-150';
 
@@ -136,6 +227,11 @@
         tr.innerHTML = `
           <td class="py-3 px-4">${imgHtml}</td>
           <td class="py-3 px-4 font-medium text-slate-800">${escapeHtml(item.item_name)}</td>
+          <td class="py-3 px-4">
+            <span class="inline-block px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600 border border-slate-200 font-medium">
+              ${escapeHtml(item.category || '未分類')}
+            </span>
+          </td>
           <td class="py-3 px-4 text-slate-500 font-mono text-xs">${escapeHtml(item.sku || '-')}</td>
           <td class="py-3 px-4 text-center">
             <div class="inline-flex items-center justify-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
@@ -193,6 +289,7 @@
       }
     }
 
+    // 新增品項（含分類與圖片上傳）
     document.getElementById('add-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const submitBtn = document.getElementById('submit-btn');
@@ -227,6 +324,7 @@
 
         const newItem = {
           item_name: nameInput.value.trim(),
+          category: selectedCategory, // 儲存點選的分類
           sku: skuInput.value.trim() || null,
           quantity: parseInt(qtyInput.value, 10) || 0,
           image_url: uploadedImageUrl
@@ -261,8 +359,7 @@
     }
 
     function initRealtime() {
-      // 1. WebSocket 訂閱
-      const channel = client
+      client
         .channel('realtime_inventory_feed')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, payload => {
           if (payload.eventType === 'INSERT') {
@@ -282,7 +379,7 @@
           }
         });
 
-      // 2. 自動備援：每 3 秒自動拉取一次最新異動（確保即使 Safari WebSocket 休眠也能保證多端絕對同步）
+      // 自動備援輪詢（保證多端絕對同步）
       setInterval(() => {
         fetchInventory();
         setOnlineStatus(true);
@@ -295,6 +392,7 @@
     }
 
     // 啟動
+    initCategoryUI();
     fetchInventory().then(() => setOnlineStatus(true));
     initRealtime();
   </script>
