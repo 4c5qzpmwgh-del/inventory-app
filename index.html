@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>雲端即時庫存系統</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 p-4 md:p-8 min-h-screen">
+
+  <!-- 權限不足提示 (網址無效 key 時顯示) -->
+  <div id="unauthorized" class="hidden max-w-md mx-auto mt-20 bg-white p-6 rounded-xl shadow text-center">
+    <div class="text-rose-500 text-4xl mb-3">⚠️</div>
+    <h2 class="text-xl font-bold mb-2">未授權存取</h2>
+    <p class="text-sm text-slate-500">此頁面僅供持有專屬分享連結的人員使用，請向管理員索取正確連結。</p>
+  </div>
+
+  <!-- 主要應用程式 -->
+  <div id="app" class="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8">
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-6 border-b border-slate-100">
+      <div>
+        <h1 class="text-2xl font-bold tracking-tight text-slate-900">線上庫存管理</h1>
+        <p class="text-xs text-slate-400 mt-1">多端即時協同編輯</p>
+      </div>
+      <div id="sync-status" class="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200">
+        <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+        連線中...
+      </div>
+    </div>
+
+    <!-- 新增品項表單 -->
+    <form id="add-form" class="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-6 bg-slate-50 p-4 rounded-xl border border-slate-200/60">
+      <input type="text" id="name" placeholder="品項名稱 (必填)" required 
+        class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+      <input type="text" id="sku" placeholder="型號 / 條碼 (選填)" 
+        class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+      <input type="number" id="qty" placeholder="初始庫存" required min="0" value="0" 
+        class="border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+      <button type="submit" 
+        class="bg-blue-600 hover:bg-blue-700 active:scale-98 text-white font-medium py-2 px-4 rounded-lg text-sm transition shadow-sm">
+        ＋ 新增項目
+      </button>
+    </form>
+
+    <!-- 庫存列表 -->
+    <div class="mt-6 overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="border-b border-slate-200 text-slate-400 text-xs tracking-wider uppercase">
+            <th class="py-3 px-4 font-semibold">品名</th>
+            <th class="py-3 px-4 font-semibold">型號 / 識別碼</th>
+            <th class="py-3 px-4 font-semibold text-center">即時庫存</th>
+            <th class="py-3 px-4 font-semibold text-right">操作</th>
+          </tr>
+        </thead>
+        <tbody id="inventory-list" class="divide-y divide-slate-100 text-sm">
+          <tr>
+            <td colspan="4" class="py-8 text-center text-slate-400">載入中...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================
+    // ⚙️ 設定區（請將下方字串替換為你的資訊）
+    // ==========================================
+    const SUPABASE_URL = 'https://cgqloctrvtiwxywyhxgr.supabase.co'; // 你的專案網址（結尾不帶 /rest/v1/）
+    const SUPABASE_KEY = 'sb_publishable_gmxSvtV7V_VfbM0wcOj2eg_DP0Y7lfF'; // 填入你的 sb_publishable_... 金鑰
+    const ACCESS_KEY = 'inventory2026'; // 自訂分享暗號，網址需帶有 ?key=inventory2026
+
+    // 檢查網址是否有符合的 Key 參數
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('key') !== ACCESS_KEY) {
+      document.getElementById('app').classList.add('hidden');
+      document.getElementById('unauthorized').classList.remove('hidden');
+      throw new Error('未授權存取');
+    }
+
+    // 初始化 Supabase 客戶端
+    const client = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    let inventoryData = [];
+
+    // 抓取全量庫存
+    async function fetchInventory() {
+      const { data, error } = await client
+        .from('inventory')
+        .select('*')
+        .order('updated_at', { ascending: false });
+
+      if (error) {
+        console.error('抓取資料失敗:', error);
+        return;
+      }
+      inventoryData = data || [];
+      renderTable();
+    }
+
+    // 畫面渲染
+    function renderTable() {
+      const tbody = document.getElementById('inventory-list');
+      tbody.innerHTML = '';
+
+      if (inventoryData.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="py-8 text-center text-slate-400">目前尚無庫存資料，請由上方新增</td></tr>`;
+        return;
+      }
+
+      inventoryData.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-slate-50/80 transition duration-150';
+        tr.innerHTML = `
+          <td class="py-3 px-4 font-medium text-slate-800">${escapeHtml(item.item_name)}</td>
+          <td class="py-3 px-4 text-slate-500 font-mono text-xs">${escapeHtml(item.sku || '-')}</td>
+          <td class="py-3 px-4 text-center">
+            <div class="inline-flex items-center justify-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-200">
+              <button onclick="changeQty('${item.id}', ${item.quantity - 1})" class="w-7 h-7 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 font-bold shadow-sm transition">-</button>
+              <span class="w-12 text-center font-bold text-slate-800 text-base">${item.quantity}</span>
+              <button onclick="changeQty('${item.id}', ${item.quantity + 1})" class="w-7 h-7 flex items-center justify-center rounded bg-white hover:bg-slate-200 text-slate-700 font-bold shadow-sm transition">+</button>
+            </div>
+          </td>
+          <td class="py-3 px-4 text-right">
+            <button onclick="deleteItem('${item.id}')" class="text-rose-500 hover:text-rose-700 font-medium text-xs px-2 py-1 rounded hover:bg-rose-50 transition">刪除</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    // 更新數量
+    async function changeQty(id, newQty) {
+      if (newQty < 0) return;
+      // 樂觀更新前端畫面
+      inventoryData = inventoryData.map(i => i.id === id ? { ...i, quantity: newQty } : i);
+      renderTable();
+
+      const { error } = await client.from('inventory').update({ quantity: newQty }).eq('id', id);
+      if (error) {
+        console.error('更新失敗:', error);
+        fetchInventory(); // 失敗則回滾
+      }
+    }
+
+    // 刪除項目
+    async function deleteItem(id) {
+      if (!confirm('確定要刪除這筆品項嗎？')) return;
+      inventoryData = inventoryData.filter(i => i.id !== id);
+      renderTable();
+
+      const { error } = await client.from('inventory').delete().eq('id', id);
+      if (error) {
+        console.error('刪除失敗:', error);
+        fetchInventory();
+      }
+    }
+
+    // 新增品項
+    document.getElementById('add-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const nameInput = document.getElementById('name');
+      const skuInput = document.getElementById('sku');
+      const qtyInput = document.getElementById('qty');
+
+      const newItem = {
+        item_name: nameInput.value.trim(),
+        sku: skuInput.value.trim() || null,
+        quantity: parseInt(qtyInput.value, 10) || 0
+      };
+
+      const { error } = await client.from('inventory').insert([newItem]);
+      if (error) {
+        alert('新增失敗: ' + error.message);
+      } else {
+        nameInput.value = '';
+        skuInput.value = '';
+        qtyInput.value = '0';
+      }
+    });
+
+    // 設定 Realtime 監聽
+    function initRealtime() {
+      const statusEl = document.getElementById('sync-status');
+
+      client
+        .channel('inventory-channel')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, payload => {
+          if (payload.eventType === 'INSERT') {
+            inventoryData.unshift(payload.new);
+          } else if (payload.eventType === 'UPDATE') {
+            inventoryData = inventoryData.map(item => item.id === payload.new.id ? payload.new : item);
+          } else if (payload.eventType === 'DELETE') {
+            inventoryData = inventoryData.filter(item => item.id !== payload.old.id);
+          }
+          renderTable();
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            statusEl.className = 'flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200';
+            statusEl.innerHTML = '<span class="w-2 h-2 rounded-full bg-emerald-500"></span> 即時連線同步中';
+          } else {
+            statusEl.className = 'flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200';
+            statusEl.innerHTML = '<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span> 重新連線中...';
+          }
+        });
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]);
+    }
+
+    // 啟動
+    fetchInventory();
+    initRealtime();
+  </script>
+</body>
+</html>
